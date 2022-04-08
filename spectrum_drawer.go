@@ -12,6 +12,12 @@ import (
 const xLogScaleFactor = 600
 const freqLeftOffset = 2500
 
+type XLabel struct {
+	Y    int
+	Text string
+	color.Color
+}
+
 type SpectrumDrawerItems struct {
 	points   []float64
 	drawLine bool
@@ -36,6 +42,7 @@ type SpectrumDrawerBuilder struct {
 	axisColor       color.Color
 	titleColor      color.Color
 	temp            mn.MTemperament
+	xLabels         []XLabel
 }
 
 func NewSpectrumDrawer(drawer *DrawerBuilder, frequencies []float64) *SpectrumDrawerBuilder {
@@ -48,10 +55,15 @@ func NewSpectrumDrawer(drawer *DrawerBuilder, frequencies []float64) *SpectrumDr
 		titleColor:      image.White.C,
 		items:           make([]SpectrumDrawerItems, 0),
 		temp:            mn.NewMTemperamentEqual(440),
+		xLabels:         make([]XLabel, 0),
 	}
 }
 func (s *SpectrumDrawerBuilder) Temperament(temp mn.MTemperament) *SpectrumDrawerBuilder {
 	s.temp = temp
+	return s
+}
+func (s *SpectrumDrawer) XLabel(label XLabel) *SpectrumDrawer {
+	s.xLabels = append(s.xLabels, label)
 	return s
 }
 func (s *SpectrumDrawer) SetItems(items SpectrumDrawerItems) *SpectrumDrawer {
@@ -93,10 +105,11 @@ func (s *SpectrumDrawerBuilder) Build() *SpectrumDrawer {
 	freqFactor := float64(plotWidth) / maxFrequency
 
 	return &SpectrumDrawer{
-		calculatedWidth:  calculatedWidth,
-		calculatedHeight: calculatedHeight,
-		freqFactor:       freqFactor,
-		maxFrequency:     maxFrequency,
+		SpectrumDrawerBuilder: s,
+		calculatedWidth:       calculatedWidth,
+		calculatedHeight:      calculatedHeight,
+		freqFactor:            freqFactor,
+		maxFrequency:          maxFrequency,
 	}
 }
 
@@ -165,6 +178,16 @@ func (s *SpectrumDrawer) drawXAxisOctave(oct mn.MOctave, lineTop int) {
 	}
 }
 
+func (s *SpectrumDrawer) Draw(y int) {
+	s.drawBackground()
+	s.drawPlotTitle(s.title, s.spacePart*3+y)
+	s.drawYAxis(y, nil) //TODO xLabels
+	s.drawXAxis(y)
+	if y > 0 {
+		s.drawDivider(y)
+	}
+}
+
 func (s *SpectrumDrawer) drawDivider(y int) {
 	for x := 0; x <= s.calculatedWidth; x++ {
 		s.drawable.Set(x, y, gray)
@@ -193,7 +216,13 @@ func (s *SpectrumDrawer) drawPlotTitle(title string, lineTop int) {
 	s.drawable.DrawString(x, y, title, s.titleColor)
 }
 
-func (s *SpectrumDrawer) drawYAxis(top int, labels []xlabel) {
+func (s *SpectrumDrawer) GetWidgetWidth() int {
+	return s.calculatedWidth
+}
+func (s *SpectrumDrawer) GetWidgetHeight() int {
+	return s.calculatedHeight
+}
+func (s *SpectrumDrawer) drawYAxis(top int) {
 	top += s.labelSpace
 	bottom := top + s.plotHeight + s.spacePart
 	x := s.labelSpace
@@ -201,17 +230,11 @@ func (s *SpectrumDrawer) drawYAxis(top int, labels []xlabel) {
 	for y := top; y <= bottom; y++ {
 		s.drawable.Set(x, y, s.axisColor)
 	}
-	if labels != nil {
-		for _, label := range labels {
-			for x := s.labelSpace - s.spacePart; x < s.labelSpace; x++ {
-				s.drawable.Set(x, label.Y+top, image.White)
-			}
-			s.drawable.DrawString(s.labelSpace-4*s.spacePart, label.Y+top-3, label.Text, image.White)
-		}
-	}
-}
 
-type xlabel struct {
-	Y    int
-	Text string
+	for _, label := range s.xLabels {
+		for x := s.labelSpace - s.spacePart; x < s.labelSpace; x++ {
+			s.drawable.Set(x, label.Y+top, label.Color)
+		}
+		s.drawable.DrawString(s.labelSpace-4*s.spacePart, label.Y+top-3, label.Text, label.Color)
+	}
 }

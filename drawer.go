@@ -2,6 +2,7 @@ package go_hugipipes_signal_drawer
 
 type DrawerBuilder struct {
 	plotHeight int
+	plotWidth  int
 	labelSpace int
 	spacePart  int
 	plots      []DrawerWidget
@@ -11,6 +12,7 @@ type DrawerBuilder struct {
 func NewDrawer() *DrawerBuilder {
 	return &DrawerBuilder{
 		plotHeight: 300,
+		plotWidth:  2000,
 		labelSpace: 80,
 		spacePart:  10,
 		plots:      make([]DrawerWidget, 0),

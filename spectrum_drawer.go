@@ -9,22 +9,33 @@ import (
 	"strings"
 )
 
-const xLogScaleFactor = 600
-const freqLeftOffset = 2500
-
-type XLabel struct {
-	Y    int
-	Text string
-	color.Color
+//SpectrumDrawerMark can be used to highlight a frequency in a spectrum
+type SpectrumDrawerMark struct {
+	frequency float64
+	color     color.Color
 }
 
+//NewSpectrumDrawerMark is the constructor for SpectrumDrawerMark
+func NewSpectrumDrawerMark(frequency float64, color color.Color) *SpectrumDrawerMark {
+	return &SpectrumDrawerMark{
+		frequency: frequency,
+		color:     color,
+	}
+}
+
+//SpectrumDrawerItems contains a list of plot points to draw in the spectrum. Multiple items can be plotted to one
+//spectrum (like amplitude and phase)
 type SpectrumDrawerItems struct {
 	points   []float64
 	drawLine bool
-	color    color.RGBA
+	color    color.Color
 }
 
-func NewSpectrumDrawerItems(points []float64, drawLine bool, color color.RGBA) *SpectrumDrawerItems {
+//NewSpectrumDrawerItems is the constructor for SpectrumDrawerItems
+//points are all the data-points. It will be automatically scaled to the plot
+//drawLine says, if the items should be plotted as lines from the bottom of the plot (amplitudes) or single points (phases)
+//color is the color the plot should have
+func NewSpectrumDrawerItems(points []float64, drawLine bool, color color.Color) *SpectrumDrawerItems {
 	return &SpectrumDrawerItems{
 		points,
 		drawLine,
@@ -32,21 +43,26 @@ func NewSpectrumDrawerItems(points []float64, drawLine bool, color color.RGBA) *
 	}
 }
 
-type SpectrumDrawerBuilder struct {
+//SpectrumDrawer is a widget that can be used in drawer to draw a Frequency-Spectrum
+type SpectrumDrawer struct {
 	*DrawerBuilder
+	cache           *spectrumDrawerCache
 	title           string
 	frequencies     []float64
 	items           []SpectrumDrawerItems
-	freqLogarithmic bool
+	marks           []SpectrumDrawerMark
 	backgroundColor color.Color
+	dividerColor    color.Color
 	axisColor       color.Color
 	titleColor      color.Color
 	temp            mn.MTemperament
-	xLabels         []XLabel
+	startFreq       float64
+	endFreq         float64
 }
 
-func NewSpectrumDrawer(drawer *DrawerBuilder, frequencies []float64) *SpectrumDrawerBuilder {
-	return &SpectrumDrawerBuilder{
+//NewSpectrumDrawer is the constructor for SpectrumDrawer
+func NewSpectrumDrawer(drawer *DrawerBuilder, frequencies []float64) *SpectrumDrawer {
+	return &SpectrumDrawer{
 		DrawerBuilder:   drawer,
 		title:           "No Title set",
 		frequencies:     frequencies,
@@ -54,94 +70,126 @@ func NewSpectrumDrawer(drawer *DrawerBuilder, frequencies []float64) *SpectrumDr
 		axisColor:       image.White.C,
 		titleColor:      image.White.C,
 		items:           make([]SpectrumDrawerItems, 0),
+		marks:           make([]SpectrumDrawerMark, 0),
+		dividerColor:    gray,
 		temp:            mn.NewMTemperamentEqual(440),
-		xLabels:         make([]XLabel, 0),
+		startFreq:       20,
+		endFreq:         20000,
 	}
 }
-func (s *SpectrumDrawerBuilder) Temperament(temp mn.MTemperament) *SpectrumDrawerBuilder {
+
+//spectrumDrawerCache contains data that is recalculated often during drawing
+type spectrumDrawerCache struct {
+	freqFactor       float64
+	calculatedWidth  int
+	calculatedHeight int
+}
+
+//Temperament sets the temperament of the musical notes for the x-axis. Default is equal at A4=440Hz
+func (s *SpectrumDrawer) Temperament(temp mn.MTemperament) *SpectrumDrawer {
 	s.temp = temp
 	return s
 }
-func (s *SpectrumDrawer) XLabel(label XLabel) *SpectrumDrawer {
-	s.xLabels = append(s.xLabels, label)
+
+//SetItems adds a data-set to be plotted
+func (s *SpectrumDrawer) SetItems(items *SpectrumDrawerItems) *SpectrumDrawer {
+	s.items = append(s.items, *items)
 	return s
 }
-func (s *SpectrumDrawer) SetItems(items SpectrumDrawerItems) *SpectrumDrawer {
-	s.items = append(s.items, items)
+
+//SetMark adds a mark to highlight a frequency
+func (s *SpectrumDrawer) SetMark(mark *SpectrumDrawerMark) *SpectrumDrawer {
+	s.marks = append(s.marks, *mark)
 	return s
 }
-func (s *SpectrumDrawerBuilder) BackgroundColor(backgroundColor color.Color) *SpectrumDrawerBuilder {
+
+//BackgroundColor sets the background-color of the plot. Default is black
+func (s *SpectrumDrawer) BackgroundColor(backgroundColor color.Color) *SpectrumDrawer {
 	s.backgroundColor = backgroundColor
 	return s
 }
-func (s *SpectrumDrawerBuilder) AxisColor(axisColor color.Color) *SpectrumDrawerBuilder {
+
+//DividerColor sets the divider-color of the plot. Default is gray
+func (s *SpectrumDrawer) DividerColor(dividerColor color.Color) *SpectrumDrawer {
+	s.dividerColor = dividerColor
+	return s
+}
+
+//AxisColor sets the color of the axis. Default is white
+func (s *SpectrumDrawer) AxisColor(axisColor color.Color) *SpectrumDrawer {
 	s.axisColor = axisColor
 	return s
 }
-func (s *SpectrumDrawerBuilder) TitleColor(titleColor color.Color) *SpectrumDrawerBuilder {
+
+//TitleColor sets the color of the title of the Spectrum.
+func (s *SpectrumDrawer) TitleColor(titleColor color.Color) *SpectrumDrawer {
 	s.titleColor = titleColor
 	return s
 }
-func (s *SpectrumDrawerBuilder) LogarithmicFreq() *SpectrumDrawerBuilder {
-	s.freqLogarithmic = true
+
+//StartFreq sets the lowest shown frequency in the plot. Default is 20Hz
+func (s *SpectrumDrawer) StartFreq(startFreq float64) *SpectrumDrawer {
+	if startFreq >= s.endFreq {
+		return s
+	}
+	s.startFreq = startFreq
 	return s
 }
 
-func (s *SpectrumDrawerBuilder) Title(title string) *SpectrumDrawerBuilder {
-	s.title = title
+//EndFreq sets the highest shown frequency in the plot. Default is 20kHz
+func (s *SpectrumDrawer) EndFreq(endFreq float64) *SpectrumDrawer {
+	if s.startFreq >= endFreq {
+		return s
+	}
+	s.endFreq = endFreq
 	return s
 }
 
-func (s *SpectrumDrawerBuilder) Build() *SpectrumDrawer {
-	plotWidth := len(s.frequencies)
-	if s.freqLogarithmic {
-		plotWidth = int(math.Log2(float64(len(s.frequencies)))*xLogScaleFactor) - freqLeftOffset
-	}
+//StartNote sets the lowest shown frequency in the plot. Default is 20Hz
+func (s *SpectrumDrawer) StartNote(note mn.MNote) *SpectrumDrawer {
+	return s.StartFreq(note.LowerFrequency())
+}
 
-	calculatedWidth := plotWidth + 2*s.labelSpace
+//EndNote sets the highest shown frequency in the plot. Default is 20kHz
+func (s *SpectrumDrawer) EndNote(note mn.MNote) *SpectrumDrawer {
+	return s.EndFreq(note.UpperFrequency())
+}
 
-	calculatedHeight := s.plotHeight + 2*s.labelSpace
-	maxFrequency := s.frequencies[len(s.frequencies)-1]
-	freqFactor := float64(plotWidth) / maxFrequency
-
-	return &SpectrumDrawer{
-		SpectrumDrawerBuilder: s,
-		calculatedWidth:       calculatedWidth,
-		calculatedHeight:      calculatedHeight,
-		freqFactor:            freqFactor,
-		maxFrequency:          maxFrequency,
+//newSpectrumDrawerCache creates a new cache with pre-calculated values for plotting to avoid executing the same operation multiple times
+func (s *SpectrumDrawer) newSpectrumDrawerCache() *spectrumDrawerCache {
+	return &spectrumDrawerCache{
+		freqFactor:       float64(s.plotWidth) / (s.endFreq - s.startFreq),
+		calculatedWidth:  s.plotWidth + s.labelSpace,
+		calculatedHeight: s.plotHeight + 2*s.labelSpace,
 	}
 }
 
-type SpectrumDrawer struct {
-	*SpectrumDrawerBuilder
-	calculatedWidth  int
-	calculatedHeight int
-	freqFactor       float64
-	maxFrequency     float64
-}
-
+//freqToX recalculates a frequency to the x-coordinates
 func (s *SpectrumDrawer) freqToX(freq float64) int {
-	if !s.freqLogarithmic {
-		return int(s.freqFactor*freq) + s.labelSpace
+	if freq < s.startFreq || freq > s.endFreq {
+		return -1000
 	}
-	return int(math.Log2(float64(int(s.freqFactor*freq)+s.labelSpace))*xLogScaleFactor) - freqLeftOffset
+
+	return int((freq-s.startFreq)*s.cache.freqFactor) + s.labelSpace
 }
 
+//drawBackground plots the background
 func (s *SpectrumDrawer) drawBackground() {
-	for x := 0; x <= s.calculatedWidth; x++ {
-		for y := 0; y <= s.calculatedHeight; y++ {
+	for x := 0; x <= s.cache.calculatedWidth; x++ {
+		for y := 0; y <= s.cache.calculatedHeight; y++ {
 			s.drawable.Set(x, y, s.backgroundColor)
 		}
 	}
 }
+
+//drawXAxis draws the x-axis of the plot
 func (s *SpectrumDrawer) drawXAxis(y int) {
 	y += s.labelSpace + s.plotHeight
-	for x := s.labelSpace - s.spacePart; x <= s.calculatedWidth; x++ {
+	for x := s.labelSpace - s.spacePart; x <= s.cache.calculatedWidth; x++ {
 		s.drawable.Set(x, y, s.axisColor)
 	}
 
-	s.drawXAxisOctave(s.temp.Octave(mn.OctaveMinus1), y)
+	//s.drawXAxisOctave(s.temp.Octave(mn.OctaveMinus1), y)
 	s.drawXAxisOctave(s.temp.Octave(mn.Octave0), y)
 	s.drawXAxisOctave(s.temp.Octave(mn.Octave1), y)
 	s.drawXAxisOctave(s.temp.Octave(mn.Octave2), y)
@@ -152,48 +200,115 @@ func (s *SpectrumDrawer) drawXAxis(y int) {
 	s.drawXAxisOctave(s.temp.Octave(mn.Octave7), y)
 	s.drawXAxisOctave(s.temp.Octave(mn.Octave8), y)
 	s.drawXAxisOctave(s.temp.Octave(mn.Octave9), y)
+	s.drawStartAndEndFreq(y)
 }
+
+//drawStartAndEndFreq draws the frequencies in the x-axis of the lowest and highest frequencies
+func (s *SpectrumDrawer) drawStartAndEndFreq(lineTop int) {
+	lineBottom := lineTop + 5*s.spacePart
+	x1 := s.freqToX(s.startFreq)
+	yFreq := lineTop + s.spacePart*7
+	x2 := s.freqToX(s.endFreq)
+
+	for y := lineTop; y <= lineBottom; y++ {
+		s.drawable.Set(x1, y, s.axisColor)
+		s.drawable.Set(x2, y, s.axisColor)
+	}
+	x1 = x1 + 5
+	x2 = x2 - 100
+	s.drawable.DrawString(x1, yFreq, fmt.Sprintf("%fHz", s.startFreq), s.axisColor)
+	s.drawable.DrawString(x2, yFreq, fmt.Sprintf("%fHz", s.endFreq), s.axisColor)
+
+}
+
+//drawXAxisOctave draws one musical octave in the x-axis
 func (s *SpectrumDrawer) drawXAxisOctave(oct mn.MOctave, lineTop int) {
 	//Draw line
-	x1 := s.freqToX(oct.LowerFrequency())
-	x2 := s.freqToX(oct.UpperFrequency())
-	lineBottom := lineTop + 5*s.spacePart
+	x1 := s.freqToX(oct.Note(mn.C).ExactFrequency())
+	if x1 < 0 {
+		return
+	}
+	x2 := s.freqToX(oct.Note(mn.C).ExactFrequency() * 2)
+	lineBottom := lineTop + 4*s.spacePart
 	for y := lineTop; y <= lineBottom; y++ {
 		s.drawable.Set(x1, y, s.axisColor)
 		s.drawable.Set(x2, y, s.axisColor)
 	}
 	notes := oct.AllNotes()
-	if len(notes) == 0 {
-		y := lineTop + 2*s.spacePart
-		xCenter := s.freqToX((oct.LowerFrequency()+oct.UpperFrequency())/2) - 3
-		s.drawable.DrawString(xCenter, y, oct.String(), s.axisColor)
-	}
-	if oct.Octave() > mn.Octave1 {
-		xFreq := s.freqToX(oct.LowerFrequency()) + 5
-		yFreq := lineTop + s.spacePart*5
-		s.drawable.DrawString(xFreq, yFreq, fmt.Sprintf("%fHz", oct.LowerFrequency()), blue)
-	}
 	for _, note := range notes {
 		s.drawXAxisNote(note, lineTop)
 	}
 }
 
-func (s *SpectrumDrawer) Draw(y int) {
+//draw draws all content to the drawable
+func (s *SpectrumDrawer) draw(y int) {
+	s.cache = s.newSpectrumDrawerCache()
 	s.drawBackground()
 	s.drawPlotTitle(s.title, s.spacePart*3+y)
-	s.drawYAxis(y, nil) //TODO xLabels
+	for _, mark := range s.marks {
+		s.drawMark(mark, y)
+	}
+	for _, item := range s.items {
+		s.drawItem(item, y)
+	}
 	s.drawXAxis(y)
+	s.drawYAxis(y)
 	if y > 0 {
 		s.drawDivider(y)
 	}
+
 }
 
-func (s *SpectrumDrawer) drawDivider(y int) {
-	for x := 0; x <= s.calculatedWidth; x++ {
-		s.drawable.Set(x, y, gray)
+//drawMark draws a line to highlight a special frequency
+func (s *SpectrumDrawer) drawMark(mark SpectrumDrawerMark, y int) {
+	x := s.freqToX(mark.frequency)
+	bottom := y + s.plotHeight + s.labelSpace
+	top := y + s.labelSpace
+	for y := top; y <= bottom; y++ {
+		s.drawable.Set(x, y, mark.color)
 	}
 }
 
+//drawItem draws the plot-points of a points set to the spectrum
+func (s *SpectrumDrawer) drawItem(item SpectrumDrawerItems, y int) {
+	maxValue := item.points[0]
+	minValue := item.points[0]
+	for _, v := range item.points {
+		maxValue = math.Max(maxValue, v)
+		minValue = math.Min(minValue, v)
+	}
+	offset := -minValue
+	maxValue += offset
+
+	factor := float64(s.plotHeight) / maxValue
+
+	bottom := y + s.labelSpace + s.plotHeight
+	for i, f := range s.frequencies {
+		it := item.points[i]
+		x := s.freqToX(f)
+		if x > 0 {
+			yPoint := it + offset
+			yPoint = yPoint * factor
+			YPoint := bottom - int(yPoint)
+			if item.drawLine {
+				for y := bottom; y >= YPoint; y-- {
+					s.drawable.Set(x, y, item.color)
+				}
+			} else {
+				s.drawable.Set(x, YPoint, item.color)
+			}
+		}
+	}
+}
+
+//drawDivider draws a horizontal line a the end of the plot
+func (s *SpectrumDrawer) drawDivider(y int) {
+	for x := 0; x <= s.cache.calculatedWidth; x++ {
+		s.drawable.Set(x, y, s.dividerColor)
+	}
+}
+
+//Draws a musical note to the x-axis
 func (s *SpectrumDrawer) drawXAxisNote(n mn.MNote, lineTop int) {
 	x1 := s.freqToX(n.ExactFrequency())
 	lineBottom := lineTop + s.spacePart
@@ -203,25 +318,33 @@ func (s *SpectrumDrawer) drawXAxisNote(n mn.MNote, lineTop int) {
 	y := lineBottom + s.spacePart + 3
 	x := x1 - 2
 	if !strings.Contains(n.String(), "#") {
-		s.drawable.DrawString(x, y, n.String(), s.axisColor)
+		s.drawable.DrawString(x+5, y, n.String(), s.axisColor)
+		y += s.spacePart*2 + 3
+		s.drawable.DrawString(x+5, y, fmt.Sprintf("%d", n.MidiNoteNumber()), s.axisColor)
 	}
 
-	y += s.spacePart + 3
-	s.drawable.DrawString(x, y, fmt.Sprintf("%d", n.MidiNoteNumber()), s.axisColor)
 }
 
+//Draws the plot title
 func (s *SpectrumDrawer) drawPlotTitle(title string, lineTop int) {
 	x := s.labelSpace
 	y := lineTop + 3*s.spacePart
 	s.drawable.DrawString(x, y, title, s.titleColor)
 }
 
+//GetWidgetWidth implements Widget interface
 func (s *SpectrumDrawer) GetWidgetWidth() int {
-	return s.calculatedWidth
+	s.cache = s.newSpectrumDrawerCache()
+	return s.cache.calculatedWidth
 }
+
+//GetWidgetHeight implements Widget interface
 func (s *SpectrumDrawer) GetWidgetHeight() int {
-	return s.calculatedHeight
+	s.cache = s.newSpectrumDrawerCache()
+	return s.cache.calculatedHeight
 }
+
+//Draws the y axis
 func (s *SpectrumDrawer) drawYAxis(top int) {
 	top += s.labelSpace
 	bottom := top + s.plotHeight + s.spacePart
@@ -231,10 +354,4 @@ func (s *SpectrumDrawer) drawYAxis(top int) {
 		s.drawable.Set(x, y, s.axisColor)
 	}
 
-	for _, label := range s.xLabels {
-		for x := s.labelSpace - s.spacePart; x < s.labelSpace; x++ {
-			s.drawable.Set(x, label.Y+top, label.Color)
-		}
-		s.drawable.DrawString(s.labelSpace-4*s.spacePart, label.Y+top-3, label.Text, label.Color)
-	}
 }

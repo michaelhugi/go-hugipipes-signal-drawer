@@ -61,10 +61,10 @@ type SpectrumDrawer struct {
 }
 
 //NewSpectrumDrawer is the constructor for SpectrumDrawer
-func NewSpectrumDrawer(drawer *DrawerBuilder, frequencies []float64) *SpectrumDrawer {
+func NewSpectrumDrawer(drawer *DrawerBuilder, frequencies []float64, title string) *SpectrumDrawer {
 	return &SpectrumDrawer{
 		DrawerBuilder:   drawer,
-		title:           "No Title set",
+		title:           title,
 		frequencies:     frequencies,
 		backgroundColor: image.Black.C,
 		axisColor:       image.White.C,
@@ -159,7 +159,7 @@ func (s *SpectrumDrawer) EndNote(note mn.MNote) *SpectrumDrawer {
 func (s *SpectrumDrawer) newSpectrumDrawerCache() *spectrumDrawerCache {
 	return &spectrumDrawerCache{
 		freqFactor:       float64(s.plotWidth) / (s.endFreq - s.startFreq),
-		calculatedWidth:  s.plotWidth + s.labelSpace,
+		calculatedWidth:  s.plotWidth + 2*s.labelSpace,
 		calculatedHeight: s.plotHeight + 2*s.labelSpace,
 	}
 }
@@ -174,9 +174,11 @@ func (s *SpectrumDrawer) freqToX(freq float64) int {
 }
 
 //drawBackground plots the background
-func (s *SpectrumDrawer) drawBackground() {
+func (s *SpectrumDrawer) drawBackground(y int) {
+	top := y
+	bottom := top + s.cache.calculatedHeight
 	for x := 0; x <= s.cache.calculatedWidth; x++ {
-		for y := 0; y <= s.cache.calculatedHeight; y++ {
+		for y := top; y <= bottom; y++ {
 			s.drawable.Set(x, y, s.backgroundColor)
 		}
 	}
@@ -185,7 +187,8 @@ func (s *SpectrumDrawer) drawBackground() {
 //drawXAxis draws the x-axis of the plot
 func (s *SpectrumDrawer) drawXAxis(y int) {
 	y += s.labelSpace + s.plotHeight
-	for x := s.labelSpace - s.spacePart; x <= s.cache.calculatedWidth; x++ {
+	maxX := s.cache.calculatedWidth - s.labelSpace
+	for x := s.labelSpace - s.spacePart; x <= maxX; x++ {
 		s.drawable.Set(x, y, s.axisColor)
 	}
 
@@ -243,7 +246,7 @@ func (s *SpectrumDrawer) drawXAxisOctave(oct mn.MOctave, lineTop int) {
 //draw draws all content to the drawable
 func (s *SpectrumDrawer) draw(y int) {
 	s.cache = s.newSpectrumDrawerCache()
-	s.drawBackground()
+	s.drawBackground(y)
 	s.drawPlotTitle(s.title, s.spacePart*3+y)
 	for _, mark := range s.marks {
 		s.drawMark(mark, y)
@@ -332,14 +335,14 @@ func (s *SpectrumDrawer) drawPlotTitle(title string, lineTop int) {
 	s.drawable.DrawString(x, y, title, s.titleColor)
 }
 
-//GetWidgetWidth implements Widget interface
-func (s *SpectrumDrawer) GetWidgetWidth() int {
+//getWidgetWidth implements Widget interface
+func (s *SpectrumDrawer) getWidgetWidth() int {
 	s.cache = s.newSpectrumDrawerCache()
 	return s.cache.calculatedWidth
 }
 
-//GetWidgetHeight implements Widget interface
-func (s *SpectrumDrawer) GetWidgetHeight() int {
+//getWidgetHeight implements Widget interface
+func (s *SpectrumDrawer) getWidgetHeight() int {
 	s.cache = s.newSpectrumDrawerCache()
 	return s.cache.calculatedHeight
 }

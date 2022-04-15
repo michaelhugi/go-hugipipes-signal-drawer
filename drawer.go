@@ -43,14 +43,14 @@ func (s *DrawerBuilder) AddPlot(plot DrawerWidget) *DrawerBuilder {
 func (s *DrawerBuilder) GetHeight() int {
 	h := 0
 	for _, p := range s.plots {
-		h += p.GetWidgetHeight()
+		h += p.getWidgetHeight()
 	}
 	return h
 }
 func (s *DrawerBuilder) GetWidth() int {
 	w := 0
 	for _, p := range s.plots {
-		w = max(w, p.GetWidgetWidth())
+		w = max(w, p.getWidgetWidth())
 	}
 	return w
 }
@@ -73,8 +73,8 @@ func newDrawer(builder *DrawerBuilder) *Drawer {
 func (s *Drawer) Draw() {
 	y := 0
 	for _, p := range s.plots {
-		p.Draw(y)
-		y += p.GetWidgetHeight()
+		p.draw(y)
+		y += p.getWidgetHeight()
 	}
 }
 

@@ -198,9 +198,10 @@ func (s *WaveDrawer) drawItem(item WaveDrawerItems, y int) {
 	factor := float64(s.plotHeight) / maxValue
 
 	bottom := y + s.labelSpace + s.plotHeight
-	for i, t := range s.times {
+	for i, it := range item.points {
+		t := s.times[i]
 		if t.Milliseconds() >= s.startTime.Milliseconds() && t.Milliseconds() <= s.endTime.Milliseconds() {
-			it := item.points[i]
+			//it := item.points[i]
 			x := s.timeToX(t)
 			if x > 0 {
 				yPoint := it + offset
